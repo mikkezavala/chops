@@ -17,7 +17,7 @@
   },
   "groups" : [
     {
-      "hidden" : true,
+      "hidden" : false,
       "layers" : [
         {
           "blend-mode" : "normal",
@@ -48,6 +48,7 @@
       }
     },
     {
+      "hidden" : true,
       "layers" : [
         {
           "fill" : "none",
