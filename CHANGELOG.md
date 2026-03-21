@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-03-21
+
+- Delete skills directly from the context menu or toolbar
+- Diagnostic logging and fixes for UI freezing
+
 ## [1.3.0] - 2026-03-21
 
 - Markdown preview mode with syntax highlighting in the skill editor
