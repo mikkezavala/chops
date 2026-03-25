@@ -3,6 +3,20 @@
   <channel>
     <title>Chops</title>
     <item>
+      <title>Version 1.8.0</title>
+      <sparkle:version>1.8.0</sparkle:version>
+      <sparkle:shortVersionString>1.8.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <pubDate>Wed, 25 Mar 2026 11:45:30 +0000</pubDate>
+      <description><![CDATA[<ul><li>Add skills to collections via right-click context menu</li><li>Drag and drop skills into sidebar collections</li><li>Detect skills from Claude Desktop and CLI plugins</li><li>Faster skill preview loading (eliminated ~2s delay)</li></ul>]]></description>
+      <enclosure
+        url="https://github.com/Shpigford/chops/releases/download/v1.8.0/Chops.dmg"
+        sparkle:edSignature="61CLO9ZmLNdIEP3ItN9Qw/YNJKzJvkOb+b+o4CFmxQCDAoX23fvzMVFL9yfUnuoSr5DgBkMApJrkWZl/Wbo0Cg=="
+        length="5092967"
+        type="application/octet-stream"
+      />
+    </item>
+    <item>
       <title>Version 1.7.0</title>
       <sparkle:version>1.7.0</sparkle:version>
       <sparkle:shortVersionString>1.7.0</sparkle:shortVersionString>
