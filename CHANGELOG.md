@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-03-27
+
+- Scan and display agents alongside skills
+
 ## [1.8.0] - 2026-03-25
 
 - Add skills to collections via right-click context menu
