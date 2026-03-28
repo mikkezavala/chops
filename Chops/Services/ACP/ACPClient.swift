@@ -12,6 +12,14 @@ struct PermissionRequest: Identifiable, @unchecked Sendable {
     let continuation: CheckedContinuation<RequestPermissionResponse, Error>
 }
 
+struct PendingWrite: Sendable {
+    let path: String
+    let content: String
+    let originalText: String?
+    let originalData: Data?
+    let existedBefore: Bool
+}
+
 /// Base class for ACP agent interaction. Owns an `ACP.Client` actor and conforms to `ClientDelegate`.
 /// Subclass to override vendor-specific hooks: additionalFlags, postProcess, conversationalText,
 /// resolvePermission, and the onXxx stream callbacks.
@@ -24,7 +32,7 @@ open class BaseACPAgent: ClientDelegate {
     var responseText: String = ""
     var thoughtText: String = ""
     var currentActivity: String?
-    var pendingWrites: [(path: String, content: String, original: String?)] = []
+    var pendingWrites: [PendingWrite] = []
     private(set) var sessionConfigOptions: [SessionConfigOption] = []
     private(set) var pendingPermissionRequest: PermissionRequest?
     private(set) var isConnected: Bool = false
@@ -122,6 +130,12 @@ open class BaseACPAgent: ClientDelegate {
         connectTask = nil
         notificationTask?.cancel()
         notificationTask = nil
+        // Resume any parked permission continuation before tearing down —
+        // CheckedContinuation will crash if it is never resumed.
+        if let req = pendingPermissionRequest {
+            pendingPermissionRequest = nil
+            req.continuation.resume(returning: RequestPermissionResponse(outcome: PermissionOutcome(cancelled: true)))
+        }
         let client = acpClient
         acpClient = nil
         sessionId = nil
@@ -153,6 +167,11 @@ open class BaseACPAgent: ClientDelegate {
     private func onAgentDisconnected() {
         if isConnected {
             isConnected = false
+            // Resume any parked permission continuation so it doesn't leak.
+            if let req = pendingPermissionRequest {
+                pendingPermissionRequest = nil
+                req.continuation.resume(returning: RequestPermissionResponse(outcome: PermissionOutcome(cancelled: true)))
+            }
             acpLog.debug("Agent process ended")
         }
     }
@@ -243,11 +262,24 @@ open class BaseACPAgent: ClientDelegate {
             URL(fileURLWithPath: $0.path).resolvingSymlinksInPath().path == resolvedIncoming
         }
         if !alreadyCaptured {
-            let original = await Task.detached {
-                (try? String(contentsOfFile: path, encoding: .utf8))
-                    ?? (try? String(contentsOfFile: path, encoding: .utf16))
+            let snapshot = await Task.detached {
+                let existedBefore = FileManager.default.fileExists(atPath: path)
+                let originalData = existedBefore ? try? Data(contentsOf: URL(fileURLWithPath: path)) : nil
+                return (
+                    existedBefore,
+                    originalData,
+                    Self.decodeText(from: originalData)
+                )
             }.value
-            pendingWrites.append((path: path, content: content, original: original))
+            pendingWrites.append(
+                PendingWrite(
+                    path: path,
+                    content: content,
+                    originalText: snapshot.2,
+                    originalData: snapshot.1,
+                    existedBefore: snapshot.0
+                )
+            )
         }
         // Write to disk — agent expects the file to be persisted.
         try await Task.detached {
@@ -351,6 +383,12 @@ open class BaseACPAgent: ClientDelegate {
         acpLog.error("'\(name)' not found in PATH — launch will likely fail")
         return name
     }
+
+    nonisolated static func decodeText(from data: Data?) -> String? {
+        guard let data else { return nil }
+        return String(data: data, encoding: .utf8)
+            ?? String(data: data, encoding: .utf16)
+    }
 }
 
 // MARK: - Errors
@@ -369,4 +407,3 @@ enum ACPClientError: Error, LocalizedError {
         }
     }
 }
-

@@ -17,7 +17,7 @@ struct ComposePanel: View {
 
     @State private var selectedTemplateType: WizardTemplateType
     @State private var inputText = ""
-    @State private var selectedAgentId: String?
+    @AppStorage("ACPSelectedAgentId") private var selectedAgentId: String?
     @State private var acpClient: BaseACPAgent?
     @State private var showingDebugLogs = false
 
@@ -70,11 +70,12 @@ struct ComposePanel: View {
 
             if configuredAgents.isEmpty {
                 noToolsConfiguredView
+            } else if !isConnected && messages.isEmpty {
+                agentPickerEmptyState
             } else {
                 VStack(spacing: 0) {
                     topBar
                     Divider()
-                    configOptionsBar
                     chatArea
                     Divider()
                     inputArea
@@ -93,6 +94,11 @@ struct ComposePanel: View {
         }
         .onChange(of: selectedAgentId) { _, _ in
             forceDisconnect()
+        }
+        .onChange(of: configuredAgents.map(\.id)) { _, newIds in
+            if selectedAgentId == nil || !newIds.contains(selectedAgentId ?? "") {
+                selectedAgentId = newIds.first
+            }
         }
         .task { await ACPConfiguration.shared.loadRegistryIfNeeded() }
         .sheet(isPresented: Binding(
@@ -144,21 +150,101 @@ struct ComposePanel: View {
 
     @Environment(\.openSettings) private var openSettings
 
-    private var noToolsConfiguredView: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle")
-                .foregroundStyle(.orange)
-            Text("No ACP agents enabled.")
-                .foregroundStyle(.secondary)
-            Button("Open Settings") {
-                openSettings()
+    private var agentPickerEmptyState: some View {
+        ZStack(alignment: .topTrailing) {
+            VStack(spacing: 12) {
+                Image(systemName: "sparkles")
+                    .font(.largeTitle)
+                    .foregroundStyle(.tertiary)
+                Text("Choose an agent to get started")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Picker("", selection: $selectedAgentId) {
+                    Text("Select agent…").tag(nil as String?)
+                    ForEach(configuredAgents) { agent in
+                        Text(agent.name).tag(Optional(agent.id))
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+                if selectedAgentId != nil {
+                    if isConnecting {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Connecting…")
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.callout)
+                    } else {
+                        Button {
+                            connect()
+                        } label: {
+                            Label("Connect", systemImage: "link")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
+                    }
+                }
             }
-            .buttonStyle(.link)
-            Spacer()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
             closeButton
+                .padding(12)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+    }
+
+    @State private var configuration = ACPConfiguration.shared
+
+    private var noToolsConfiguredView: some View {
+        ZStack(alignment: .topTrailing) {
+            VStack(spacing: 16) {
+                Image(systemName: "sparkles")
+                    .font(.largeTitle)
+                    .foregroundStyle(.tertiary)
+                Text("Enable an agent to get started")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                VStack(spacing: 0) {
+                    if configuration.isLoadingRegistry {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Loading agents…").foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 12)
+                    } else {
+                        ForEach(configuration.registryAgents) { agent in
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(agent.name)
+                                        .font(.callout.weight(.medium))
+                                    Text(agent.description)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                Toggle("", isOn: Binding(
+                                    get: { configuration.isEnabled(agent.id) },
+                                    set: { configuration.setEnabled(agent.id, $0) }
+                                ))
+                                .labelsHidden()
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                        }
+                    }
+                }
+                .background(Color.primary.opacity(0.05))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .frame(maxWidth: 320)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            closeButton
+                .padding(12)
+        }
+        .task { await configuration.loadRegistryIfNeeded() }
     }
 
     private var topBar: some View {
@@ -193,18 +279,9 @@ struct ComposePanel: View {
                 .frame(maxWidth: 200)
             }
 
-            // RIGHT: Template picker + close
-            // Always visible so the selection is clear; disabled after first turn.
-            HStack(spacing: 12) {
-                Picker("", selection: $selectedTemplateType) {
-                    ForEach(WizardTemplateType.allCases) { type in
-                        Label(type.displayName, systemImage: type.icon).tag(type)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 140)
-                .disabled(!isFirstTurn)
-                .help(isFirstTurn ? "Template for this session" : "Reconnect to change template")
+            // RIGHT: Config options (when connected) + close
+            HStack(spacing: 8) {
+                inlineConfigOptions
                 closeButton
             }
         }
@@ -215,24 +292,16 @@ struct ComposePanel: View {
 
     // MARK: - Config Options Bar
 
-    /// Renders a row of pickers for session-level config options (mode, model, etc.).
-    /// Visible only when connected and the agent has returned at least one config option.
+    /// Inline config option pickers shown in the top bar when connected.
     @ViewBuilder
-    private var configOptionsBar: some View {
+    private var inlineConfigOptions: some View {
         let options = acpClient?.sessionConfigOptions ?? []
         if isConnected && !options.isEmpty {
-            HStack(spacing: 12) {
-                ForEach(options, id: \.id) { option in
-                    if case .select(let select) = option.kind {
-                        configOptionPicker(option: option, select: select)
-                    }
+            ForEach(options, id: \.id) { option in
+                if case .select(let select) = option.kind {
+                    configOptionPicker(option: option, select: select)
                 }
-                Spacer()
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(Color(.controlBackgroundColor).opacity(0.6))
-            Divider()
         }
     }
 
@@ -251,7 +320,7 @@ struct ComposePanel: View {
             }
         )) {
             ForEach(flatOptions, id: \.value) { opt in
-                Text(opt.name).tag(opt.value)
+                Text(opt.name.replacingOccurrences(of: " (recommended)", with: "")).tag(opt.value)
             }
         }
         .fixedSize()
@@ -277,8 +346,10 @@ struct ComposePanel: View {
                         if messages.isEmpty && !isProcessing {
                             if isConnected {
                                 connectedPlaceholder
+                                    .frame(height: geo.size.height - 24)
                             } else {
                                 disconnectedPlaceholder
+                                    .frame(height: geo.size.height - 24)
                             }
                         }
                         ForEach(visibleMessages) { message in
@@ -314,24 +385,34 @@ struct ComposePanel: View {
     }
 
     private var disconnectedPlaceholder: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "link.badge.plus")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-            Text("Connect an agent to start composing")
+        VStack(spacing: 12) {
+            Image(systemName: "sparkles")
+                .font(.largeTitle)
+                .foregroundStyle(.tertiary)
+            Text("Connect to start editing with AI")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+            Button {
+                connect()
+            } label: {
+                Label("Connect", systemImage: "link")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var connectedPlaceholder: some View {
-        Text("Session ready. Send your first instruction.")
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
+        VStack(spacing: 8) {
+            Text("Describe what you'd like to change")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Text("The agent will edit this skill based on your instructions")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Live Assistant Row (SDK-driven, shown while prompt is active)
@@ -353,7 +434,6 @@ struct ComposePanel: View {
                     Image(systemName: "sparkles").foregroundStyle(.secondary)
                     Text("Agent").foregroundStyle(.secondary)
                     Spacer()
-                    ProgressView().controlSize(.mini).padding(.trailing, 2)
                 }
                 .font(.caption)
                 .padding(.horizontal, 10).padding(.top, 8).padding(.bottom, 4)
@@ -383,7 +463,7 @@ struct ComposePanel: View {
                 }
             }
             .frame(maxWidth: bubbleWidth, alignment: .leading)
-            .background(Color.primary.opacity(0.06))
+            .background(Color.primary.opacity(0.09))
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2)))
         }
@@ -403,8 +483,8 @@ struct ComposePanel: View {
                         .textSelection(.enabled)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
-                        .background(Color.accentColor.opacity(0.15))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .background(Color.accentColor.opacity(0.22))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                         .frame(maxWidth: bubbleWidth, alignment: .trailing)
                 }
             case .assistant:
@@ -461,7 +541,7 @@ struct ComposePanel: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         // Use a primary-relative tint so the card is visibly distinct from the window
         // background in both light and dark mode (controlBackgroundColor is too similar).
-        .background(message.isError ? Color.orange.opacity(0.08) : Color.primary.opacity(0.06))
+        .background(message.isError ? Color.orange.opacity(0.08) : Color.primary.opacity(0.09))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
@@ -505,26 +585,25 @@ struct ComposePanel: View {
 
     // MARK: - Input Area
 
+    private var sendDisabled: Bool {
+        !isConnected || inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isProcessing || hasPendingDiffs
+    }
+
     private var inputArea: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            ZStack(alignment: .topLeading) {
-                if inputText.isEmpty {
-                    Text(isFirstTurn ? "Enter instructions…" : "Follow up…")
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
+            TextField(isFirstTurn ? "Enter instructions…" : "Follow up…", text: $inputText, axis: .vertical)
+                .font(.body)
+                .textFieldStyle(.plain)
+                .lineLimit(1...4)
+                .disabled(isProcessing || !isConnected || hasPendingDiffs)
+                .onSubmit {
+                    if !sendDisabled { sendMessage() }
                 }
-                TextEditor(text: $inputText)
-                    .font(.body)
-                    .scrollContentBackground(.hidden)
-                    .frame(minHeight: 36, maxHeight: 80)
-                    .disabled(isProcessing || !isConnected || hasPendingDiffs)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 4)
-            }
-            .background(Color(.textBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2)))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 8)
+                .background(Color(.textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.25)))
 
             Button {
                 sendMessage()
@@ -536,27 +615,34 @@ struct ComposePanel: View {
                         Image(systemName: "paperplane.fill")
                     }
                 }
-                .frame(width: 24, height: 24)
+                .font(.body)
+                .foregroundStyle(.white)
+                .frame(width: 36)
+                .frame(maxHeight: .infinity)
+                .background(sendDisabled ? Color.accentColor.opacity(0.4) : Color.accentColor)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(!isConnected || inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isProcessing || hasPendingDiffs)
+            .buttonStyle(.plain)
+            .disabled(sendDisabled)
             .keyboardShortcut(.return, modifiers: .command)
+            .help("Send (⌘↩)")
         }
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(Color(.controlBackgroundColor))
     }
 
     private var resizeHandle: some View {
-        ZStack {
+        VStack(spacing: 0) {
             Color(.separatorColor)
                 .frame(height: 1)
             RoundedRectangle(cornerRadius: 2)
                 .fill(Color.secondary.opacity(isDragging ? 0.5 : 0.25))
                 .frame(width: 36, height: 4)
+                .padding(.vertical, 3)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 10)
         .contentShape(Rectangle())
         .onHover { hovering in
             if hovering {
@@ -650,14 +736,6 @@ struct ComposePanel: View {
         client.startConnect(agent: agent, workingDirectory: workingDirectory, systemPrompt: systemPrompt)
     }
 
-    private func forceDisconnect() {
-        let client = acpClient
-        acpClient = nil
-        isFirstTurn = true
-        messages = []
-        Task { await client?.disconnect() }
-    }
-
     private func sendMessage() {
         guard let client = acpClient else { return }
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -724,12 +802,25 @@ struct ComposePanel: View {
         client.clearPendingWrites()
         let newContent = await readFile(at: filePath) ?? originalContent
         if newContent != originalContent {
-            await attachDiffs(messageId: messageId, writes: [(path: filePath, content: newContent, original: nil)], fallbackOriginal: originalContent)
+            await attachDiffs(
+                messageId: messageId,
+                writes: [
+                    PendingWrite(
+                        path: filePath,
+                        content: newContent,
+                        originalText: originalContent,
+                        originalData: originalContent.data(using: .utf8),
+                        existedBefore: true
+                    )
+                ],
+                fallbackOriginal: originalContent
+            )
         }
     }
 
     /// Converts pending writes into ChatDiff entries and attaches them to the message.
-    /// Disk reads for non-current files are dispatched off the main actor.
+    /// Uses the pre-write snapshot captured by the ACP layer; do not reread disk here because
+    /// the agent may already have mutated the file.
     /// Resolves `path` through symlinks so that e.g. a `.cursor/rules/foo.md` symlink
     /// and its target `~/.aidevtools/rules/foo.md` compare as equal.
     private func resolvedPath(_ path: String) -> String {
@@ -738,7 +829,7 @@ struct ComposePanel: View {
 
     private func attachDiffs(
         messageId: UUID,
-        writes: [(path: String, content: String, original: String?)],
+        writes: [PendingWrite],
         fallbackOriginal: String
     ) async {
         guard let idx = messages.firstIndex(where: { $0.id == messageId }) else { return }
@@ -748,20 +839,54 @@ struct ComposePanel: View {
         for write in writes {
             let writtenResolved = resolvedPath(write.path)
             let original: String?
-            if let embedded = write.original {
+            let originalData: Data?
+            let existedBefore: Bool
+            if let embedded = write.originalText {
                 // Agent supplied the pre-edit content (e.g. DiffContent.oldText) — use it directly.
                 original = embedded
+                originalData = write.originalData
+                existedBefore = write.existedBefore
             } else if write.path == filePath || writtenResolved == resolvedFilePath {
                 // Path matches (accounting for symlinks) — use the in-memory content from before the turn.
                 original = fallbackOriginal
+                originalData = fallbackOriginal.data(using: .utf8)
+                existedBefore = true
             } else {
-                // Different file: read from disk. nil means the file didn't exist (new file).
-                original = await readFile(at: write.path)
+                original = write.originalText
+                originalData = write.originalData
+                existedBefore = write.existedBefore
             }
             acpLog.debug("Compose: diff \(write.path) original=\(original?.count ?? -1) chars")
-            diffs.append(ChatDiff(path: write.path, original: original, proposed: write.content))
+            diffs.append(
+                ChatDiff(
+                    path: write.path,
+                    original: original,
+                    originalData: originalData,
+                    existedBefore: existedBefore,
+                    proposed: write.content
+                )
+            )
         }
         messages[idx].diffs = diffs
+    }
+
+    private func pendingDiffs() -> [ChatDiff] {
+        messages.flatMap(\.diffs).filter { $0.status == .pending }
+    }
+
+    nonisolated private static func revertDiffOnDisk(_ diff: ChatDiff) {
+        let url = URL(fileURLWithPath: diff.path)
+        if diff.existedBefore {
+            if let originalData = diff.originalData {
+                try? originalData.write(to: url)
+            } else if let original = diff.original {
+                try? original.write(to: url, atomically: true, encoding: .utf8)
+            } else {
+                acpLog.error("Reject failed: missing original snapshot for \(diff.path)")
+            }
+        } else {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     private func acceptDiff(messageId: UUID, diffIndex: Int) {
@@ -780,16 +905,24 @@ struct ComposePanel: View {
               diffIndex < messages[msgIdx].diffs.count else { return }
         let diff = messages[msgIdx].diffs[diffIndex]
         messages[msgIdx].diffs[diffIndex].status = .rejected
-        // Revert the file to its pre-edit state.
-        // nil original means the agent created a new file — delete it on reject.
-        let original = diff.original
-        let path = diff.path
         Task.detached(priority: .userInitiated) {
-            if let original {
-                try? original.write(toFile: path, atomically: true, encoding: .utf8)
-            } else {
-                try? FileManager.default.removeItem(atPath: path)
+            Self.revertDiffOnDisk(diff)
+        }
+    }
+
+    private func forceDisconnect() {
+        let client = acpClient
+        let pendingDiffs = pendingDiffs()
+        acpClient = nil
+        isFirstTurn = true
+        messages = []
+        Task {
+            if !pendingDiffs.isEmpty {
+                await Task.detached(priority: .userInitiated) {
+                    pendingDiffs.forEach(Self.revertDiffOnDisk)
+                }.value
             }
+            await client?.disconnect()
         }
     }
 }

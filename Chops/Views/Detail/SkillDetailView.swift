@@ -48,6 +48,7 @@ struct SkillDetailView: View {
                     templateType: .skill,
                     onAccept: { document.save(to: skill) }
                 )
+                .id(skill.filePath)
             }
 
             Divider()

@@ -6,7 +6,7 @@ struct ThinkingView: View {
     let text: String
     let isStreaming: Bool
 
-    @State private var isExpanded: Bool = true
+    @State private var isExpanded: Bool = false
     /// Latched true once streaming ends — shows brain icon instead of spinner.
     @State private var settled: Bool = false
 

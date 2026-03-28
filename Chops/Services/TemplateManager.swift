@@ -57,14 +57,15 @@ final class TemplateManager {
     }
 
     /// Save updated template content
-    func save(_ template: WizardTemplate) {
+    func save(_ template: WizardTemplate, preserveVersionMarker: Bool = false) {
         let url = templatesDirectory.appendingPathComponent(template.type.fileName)
+        let persistedContent = preserveVersionMarker ? template.content : stripVersionMarker(from: template.content)
         do {
-            try template.content.write(to: url, atomically: true, encoding: .utf8)
+            try persistedContent.write(to: url, atomically: true, encoding: .utf8)
             if let index = templates.firstIndex(where: { $0.type == template.type }) {
                 templates[index] = WizardTemplate(
                     type: template.type,
-                    content: template.content,
+                    content: persistedContent,
                     lastModified: Date()
                 )
             }
@@ -77,7 +78,7 @@ final class TemplateManager {
     func resetToDefault(_ type: WizardTemplateType) {
         guard let bundledContent = loadBundledTemplate(type) else { return }
         let template = WizardTemplate(type: type, content: bundledContent, lastModified: Date())
-        save(template)
+        save(template, preserveVersionMarker: true)
     }
 
     /// Reset all templates to defaults
@@ -126,6 +127,14 @@ final class TemplateManager {
             return nil
         }
         return Int(content[start.upperBound ..< end.lowerBound])
+    }
+
+    private func stripVersionMarker(from content: String) -> String {
+        content.replacingOccurrences(
+            of: #"^<!-- chops-template-version: \d+ -->\n?"#,
+            with: "",
+            options: .regularExpression
+        )
     }
 
     private func loadTemplates() {
@@ -200,5 +209,4 @@ final class TemplateManager {
     """
 
 }
-
 

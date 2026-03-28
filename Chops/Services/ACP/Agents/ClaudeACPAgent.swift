@@ -89,15 +89,38 @@ final class ClaudeACPAgent: BaseACPAgent {
         guard let content else { return }
         for item in content {
             guard case .diff(let d) = item else { continue }
-            let oldText: String? = d.oldText
-                ?? (try? String(contentsOfFile: d.path, encoding: .utf8))
-                ?? (try? String(contentsOfFile: d.path, encoding: .utf16))
+            let existedBefore = FileManager.default.fileExists(atPath: d.path)
+            let oldData: Data? = if let oldText = d.oldText {
+                oldText.data(using: .utf8)
+            } else if existedBefore {
+                try? Data(contentsOf: URL(fileURLWithPath: d.path))
+            } else {
+                nil
+            }
+            let oldText = d.oldText ?? BaseACPAgent.decodeText(from: oldData)
             // Replace any existing entry for this path — Claude may emit multiple diff blocks
             // for the same file (preview then final). The last one is the most current.
-            if let existing = pendingWrites.firstIndex(where: { $0.path == d.path }) {
-                pendingWrites[existing] = (path: d.path, content: d.newText, original: pendingWrites[existing].original)
+            let resolvedPath = URL(fileURLWithPath: d.path).resolvingSymlinksInPath().path
+            if let existing = pendingWrites.firstIndex(where: {
+                URL(fileURLWithPath: $0.path).resolvingSymlinksInPath().path == resolvedPath
+            }) {
+                pendingWrites[existing] = PendingWrite(
+                    path: d.path,
+                    content: d.newText,
+                    originalText: pendingWrites[existing].originalText,
+                    originalData: pendingWrites[existing].originalData,
+                    existedBefore: pendingWrites[existing].existedBefore
+                )
             } else {
-                pendingWrites.append((path: d.path, content: d.newText, original: oldText))
+                pendingWrites.append(
+                    PendingWrite(
+                        path: d.path,
+                        content: d.newText,
+                        originalText: oldText,
+                        originalData: oldData,
+                        existedBefore: existedBefore
+                    )
+                )
             }
             acpLog.info("diff intercepted: \(d.path) original=\(oldText?.count ?? -1) chars (\(pendingWrites.count) total)")
         }

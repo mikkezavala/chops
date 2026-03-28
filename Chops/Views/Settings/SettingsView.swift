@@ -39,7 +39,7 @@ struct SettingsView: View {
                     Label("About", systemImage: "info.circle")
                 }
         }
-        .frame(minWidth: 480, minHeight: 550, idealHeight: 600)
+        .frame(minWidth: 480, maxWidth: 480, minHeight: 300)
         .onAppear {
             loadCustomPaths()
         }

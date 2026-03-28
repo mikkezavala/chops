@@ -4,12 +4,14 @@ import Foundation
 
 enum ChatRole { case user, assistant }
 
-enum DiffStatus { case pending, accepted, rejected }
+enum DiffStatus: Sendable { case pending, accepted, rejected }
 
-struct ChatDiff {
+struct ChatDiff: Sendable {
     let path: String
     /// Pre-edit content. `nil` means the file did not exist before the agent wrote it.
     let original: String?
+    let originalData: Data?
+    let existedBefore: Bool
     let proposed: String
     var status: DiffStatus = .pending
 }
