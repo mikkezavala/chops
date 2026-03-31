@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-03-31
+
+- New skills default to Global and are automatically symlinked to all installed agents
+- Convert any tool-specific skill to Global via the right-click menu
+- Global tool source now appears in the sidebar when skills exist
+- AI Assist no longer writes files until you accept the diff
+- Fixed false "not installed" detection for tools using symlinked agent directories
+
 ## [1.12.0] - 2026-03-31
 
 - Browse and install skills from OpenClaw directly on your machine
