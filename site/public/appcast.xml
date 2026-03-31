@@ -3,6 +3,20 @@
   <channel>
     <title>Chops</title>
     <item>
+      <title>Version 1.12.0</title>
+      <sparkle:version>1.12.0</sparkle:version>
+      <sparkle:shortVersionString>1.12.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <pubDate>Tue, 31 Mar 2026 10:56:05 +0000</pubDate>
+      <description><![CDATA[<ul><li>Browse and install skills from OpenClaw directly on your machine</li><li>Organize skills, rules, and agents into separate categories</li><li>Skills inside custom scan directories are now detected correctly</li><li>Registry browsing no longer hits GitHub API rate limits</li></ul>]]></description>
+      <enclosure
+        url="https://github.com/Shpigford/chops/releases/download/v1.12.0/Chops.dmg"
+        sparkle:edSignature="Iqi4fNbCjbILOLdlyDGuyIhxRMN7fef5WyI14+PjpS4X76yyicML9b85577IwoCjwnl5awz6eNh9KbXUMkMPDA=="
+        length="5901259"
+        type="application/octet-stream"
+      />
+    </item>
+    <item>
       <title>Version 1.11.0</title>
       <sparkle:version>1.11.0</sparkle:version>
       <sparkle:shortVersionString>1.11.0</sparkle:shortVersionString>
