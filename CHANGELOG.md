@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-03-31
+
+- Browse and install skills from OpenClaw directly on your machine
+- Organize skills, rules, and agents into separate categories
+- Skills inside custom scan directories are now detected correctly
+- Registry browsing no longer hits GitHub API rate limits
+
 ## [1.11.0] - 2026-03-28
 
 - Chat with AI agents directly inside Chops (ACP support)
