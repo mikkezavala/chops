@@ -200,7 +200,7 @@ enum ToolSource: String, Codable, CaseIterable, Identifiable {
         case .augment: return ["\(home)/.augment/rules"]
         case .claude: return ["\(home)/.claude/rules"]
         case .cursor: return ["\(home)/.cursor/rules"]
-        case .windsurf: return ["\(home)/.codeium/windsurf/memories", "\(home)/.windsurf/rules"]
+        case .windsurf: return ["\(home)/.codeium/memories"]
         case .shared:
             guard let base = Self.sharedBase else { return [] }
             return ["\(base)/rules"]
