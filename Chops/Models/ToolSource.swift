@@ -392,3 +392,23 @@ private extension ToolSource {
         return expanded.isEmpty ? nil : expanded
     }
 }
+
+extension ToolSource {
+    /// Returns the global directories this tool uses for the given item kind.
+    func globalDirs(for kind: ItemKind) -> [String] {
+        switch kind {
+        case .skill: return globalPaths
+        case .agent: return globalAgentPaths
+        case .rule:  return globalRulePaths
+        }
+    }
+}
+
+private extension ToolSource {
+    /// Expanded absolute path of the user-configured shared library root, or nil if unset.
+    static var sharedBase: String? {
+        let raw = UserDefaults.standard.string(forKey: "sharedLibraryPath") ?? ""
+        let expanded = (raw as NSString).expandingTildeInPath
+        return expanded.isEmpty ? nil : expanded
+    }
+}
