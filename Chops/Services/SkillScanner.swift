@@ -271,6 +271,11 @@ final class SkillScanner {
                 } else if toolSource == .hermes, kind == .skill {
                     // Hermes nests skills as ~/.hermes/skills/<category>/<skill>/SKILL.md (agentskills.io layout).
                     collectFromDirectory(item, toolSource: toolSource, isGlobal: isGlobal, kind: kind, into: &results)
+                } else if kind == .rule {
+                    // Recurse into plain subdirectories to support nested rule structures (e.g. rules/subdir/rule.md).
+                    let isSymlink = (try? rawItem.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true
+                    guard !isSymlink else { continue }
+                    collectFromDirectory(item, toolSource: toolSource, isGlobal: isGlobal, kind: kind, into: &results)
                 }
             } else if item.pathExtension == "md" || item.pathExtension == "mdc" || item.pathExtension == "toml" {
                 guard !shouldIgnoreLooseMarkdownFile(named: item.lastPathComponent) else { continue }
