@@ -156,6 +156,7 @@ struct SettingsView: View {
                     panel.canChooseFiles = false
                     panel.canChooseDirectories = true
                     panel.allowsMultipleSelection = false
+                    panel.showsHiddenFiles = true
                     if panel.runModal() == .OK, let url = panel.url {
                         let path = url.path
                         if !customPaths.contains(path) {

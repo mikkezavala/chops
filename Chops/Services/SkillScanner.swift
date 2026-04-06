@@ -142,6 +142,11 @@ final class SkillScanner {
 
         collectDirectSkillsFromCustomDirectory(directory, into: &results)
 
+        // Probe the directory itself — handles the case where the user adds a project root
+        // directly (e.g. ~/myproject) rather than a parent dir (e.g. ~/Development).
+        collectProjectProbes(in: directory, into: &results)
+
+        // Probe each subdirectory — handles the case where the user adds a parent dir.
         guard let projects = try? fm.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.isDirectoryKey],
@@ -153,21 +158,26 @@ final class SkillScanner {
             var isDir: ObjCBool = false
             fm.fileExists(atPath: project.path, isDirectory: &isDir)
             guard isDir.boolValue else { continue }
+            collectProjectProbes(in: project, into: &results)
+        }
+    }
 
-            for probe in projectProbes {
-                let probePath = project.appendingPathComponent(probe.subpath)
-                guard fm.fileExists(atPath: probePath.path) else { continue }
+    /// Scans a single directory against all tool probe paths (.claude/skills, .cursor/rules, etc.).
+    private static func collectProjectProbes(in directory: URL, into results: inout [ScannedSkillData]) {
+        let fm = FileManager.default
+        for probe in projectProbes {
+            let probePath = directory.appendingPathComponent(probe.subpath)
+            guard fm.fileExists(atPath: probePath.path) else { continue }
 
-                if probe.tool == .copilot && probe.kind == .skill {
-                    let file = probePath.appendingPathComponent("copilot-instructions.md")
-                    if fm.fileExists(atPath: file.path) {
-                        if let data = collectSkillData(at: file, toolSource: .copilot, isDirectory: false, isGlobal: false, kind: probe.kind) {
-                            results.append(data)
-                        }
+            if probe.tool == .copilot && probe.kind == .skill {
+                let file = probePath.appendingPathComponent("copilot-instructions.md")
+                if fm.fileExists(atPath: file.path) {
+                    if let data = collectSkillData(at: file, toolSource: .copilot, isDirectory: false, isGlobal: false, kind: probe.kind) {
+                        results.append(data)
                     }
-                } else {
-                    collectFromDirectory(probePath, toolSource: probe.tool, isGlobal: false, kind: probe.kind, into: &results)
                 }
+            } else {
+                collectFromDirectory(probePath, toolSource: probe.tool, isGlobal: false, kind: probe.kind, into: &results)
             }
         }
     }
