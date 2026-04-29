@@ -3,6 +3,20 @@
   <channel>
     <title>Chops</title>
     <item>
+      <title>Version 1.15.0</title>
+      <sparkle:version>1.15.0</sparkle:version>
+      <sparkle:shortVersionString>1.15.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <pubDate>Wed, 29 Apr 2026 00:31:51 +0000</pubDate>
+      <description><![CDATA[<ul><li>AI Assist now drives your installed Claude and Codex CLIs directly — fewer moving parts, more reliable responses</li></ul>]]></description>
+      <enclosure
+        url="https://github.com/Shpigford/chops/releases/download/v1.15.0/Chops.dmg"
+        sparkle:edSignature="hycVybEt1B4IvFFoxNBk7bc7WwBWnJ+So/pyoRp+50gq/UVAaRev5P9PymG6qmXz5ZRViUI68/N1eemJ/ZHnDQ=="
+        length="5163081"
+        type="application/octet-stream"
+      />
+    </item>
+    <item>
       <title>Version 1.14.0</title>
       <sparkle:version>1.14.0</sparkle:version>
       <sparkle:shortVersionString>1.14.0</sparkle:shortVersionString>
