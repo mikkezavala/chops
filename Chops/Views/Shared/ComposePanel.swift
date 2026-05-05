@@ -717,8 +717,13 @@ struct ComposePanel: View {
                 .textFieldStyle(.plain)
                 .lineLimit(1...4)
                 .disabled(isProcessing || !isConnected || hasPendingDiffs)
-                .onSubmit {
+                .onKeyPress(.return, phases: .down) { press in
+                    if press.modifiers.contains(.shift) {
+                        inputText += "\n"
+                        return .handled
+                    }
                     if !sendDisabled { sendMessage() }
+                    return .handled
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 8)
