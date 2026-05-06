@@ -200,7 +200,7 @@ enum ToolSource: String, Codable, CaseIterable, Identifiable {
         case .augment: return ["\(home)/.augment/rules"]
         case .claude: return ["\(home)/.claude/rules"]
         case .cursor: return ["\(home)/.cursor/rules"]
-        case .windsurf: return ["\(home)/.codeium/windsurf/memories", "\(home)/.windsurf/rules"]
+        case .windsurf: return ["/Library/Application Support/Windsurf/rules", "\(home)/.codeium/windsurf/memories", "\(home)/.windsurf/rules"]
         case .shared:
             guard let base = Self.sharedBase else { return [] }
             return ["\(base)/rules"]
@@ -227,6 +227,7 @@ enum ToolSource: String, Codable, CaseIterable, Identifiable {
         case .windsurf:
             return fm.fileExists(atPath: "/Applications/Windsurf.app")
                 || fm.fileExists(atPath: "\(home)/.codeium/windsurf/argv.json")
+                || fm.fileExists(atPath: "/Library/Application Support/Windsurf")
         case .codex:
             return fm.fileExists(atPath: "\(home)/.codex")
                 || Self.cliBinaryExists("codex")
@@ -382,25 +383,11 @@ extension ToolSource {
     func usesHardLink(for kind: ItemKind) -> Bool {
         self == .cursor && kind == .agent
     }
-}
 
-private extension ToolSource {
-    /// Expanded absolute path of the user-configured shared library root, or nil if unset.
-    static var sharedBase: String? {
-        let raw = UserDefaults.standard.string(forKey: "sharedLibraryPath") ?? ""
-        let expanded = (raw as NSString).expandingTildeInPath
-        return expanded.isEmpty ? nil : expanded
-    }
-}
-
-extension ToolSource {
-    /// Returns the global directories this tool uses for the given item kind.
-    func globalDirs(for kind: ItemKind) -> [String] {
-        switch kind {
-        case .skill: return globalPaths
-        case .agent: return globalAgentPaths
-        case .rule:  return globalRulePaths
-        }
+    /// Whether files linked to this tool's directory are placed at the root
+    /// rather than preserving source subdirectory structure.
+    func flattensLinks(for kind: ItemKind) -> Bool {
+        self == .windsurf
     }
 }
 

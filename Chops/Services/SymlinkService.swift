@@ -6,6 +6,7 @@ enum SymlinkError: LocalizedError {
     case notOurFile(String)
     case sourceNotFound(String)
     case noTargetDirectory(ToolSource, ItemKind)
+    case renameDestinationExists(String)
 
     var errorDescription: String? {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -19,6 +20,8 @@ enum SymlinkError: LocalizedError {
             return "Source file not found at \(tilde(p))."
         case .noTargetDirectory(let tool, let kind):
             return "\(tool.displayName) has no global directory for \(kind.displayName.lowercased())."
+        case .renameDestinationExists(let p):
+            return "A file named \"\(URL(fileURLWithPath: p).lastPathComponent)\" already exists."
         }
     }
 }
@@ -40,7 +43,12 @@ final class SymlinkService {
         }
 
         let targetDir = try vendorDirectory(for: tool, kind: skill.itemKind)
-        let relativePath = relativePathFromScanBase(source: source, kind: skill.itemKind, toolSources: skill.toolSources)
+        let relativePath: String
+        if tool.flattensLinks(for: skill.itemKind) {
+            relativePath = URL(fileURLWithPath: source).lastPathComponent
+        } else {
+            relativePath = relativePathFromScanBase(source: source, kind: skill.itemKind, toolSources: skill.toolSources, installedPaths: skill.installedPaths)
+        }
         let destination = useMarkdownExtension(
             tool, skill,
             URL(fileURLWithPath: targetDir).appendingPathComponent(relativePath)
@@ -159,6 +167,19 @@ final class SymlinkService {
         var activeHardLinks: [String: Set<ToolSource>] = [:]
 
         for record in records {
+            // Orphaned record — source skill no longer exists. Clean up the link and the record.
+            guard skillsByPath[record.skillResolvedPath] != nil else {
+                if fm.fileExists(atPath: record.linkedPath),
+                   let tool = record.toolSourceEnum,
+                   !tool.usesHardLink(for: record.itemKind),
+                   (try? fm.destinationOfSymbolicLink(atPath: record.linkedPath)) == record.skillResolvedPath {
+                    try? fm.removeItem(atPath: record.linkedPath)
+                }
+                context.delete(record)
+                dirty = true
+                continue
+            }
+
             if let skill = skillsByPath[record.skillResolvedPath], skill.kind != record.kind {
                 // Stale record — kind changed. Remove only if we can confirm it is our link.
                 if fm.fileExists(atPath: record.linkedPath),
@@ -176,8 +197,19 @@ final class SymlinkService {
             }
 
             let broken = !fm.fileExists(atPath: record.linkedPath)
-            if record.isBroken != broken {
+            if broken != record.isBroken {
                 record.isBroken = broken
+                dirty = true
+            }
+            if broken, let tool = record.toolSourceEnum, !tool.usesHardLink(for: record.itemKind),
+               (try? fm.destinationOfSymbolicLink(atPath: record.linkedPath)) != nil {
+                // Dangling soft link — remove the dead entry from the vendor directory.
+                do {
+                    try fm.removeItem(atPath: record.linkedPath)
+                } catch {
+                    AppLogger.fileIO.warning("SymlinkService.reconcile: failed to remove dangling link at \(record.linkedPath): \(error.localizedDescription)")
+                }
+                context.delete(record)
                 dirty = true
             }
 
@@ -217,6 +249,78 @@ final class SymlinkService {
         }
     }
 
+    // MARK: - Rename
+
+    /// Renames the source file on disk and re-creates all vendor links under the new filename.
+    /// Hard links are rebuilt from the new path; soft links are re-pointed to the new path.
+    func rename(_ skill: Skill, to newBaseName: String, context: ModelContext) throws {
+        guard !skill.isDirectory else { return }
+
+        let oldPath = skill.resolvedPath
+        let oldURL = URL(fileURLWithPath: oldPath)
+        let ext = oldURL.pathExtension
+        let newFilename = ext.isEmpty ? newBaseName : "\(newBaseName).\(ext)"
+        let newURL = oldURL.deletingLastPathComponent().appendingPathComponent(newFilename)
+        let newPath = newURL.path
+
+        guard newPath != oldPath else { return }
+        guard !fm.fileExists(atPath: newPath) else {
+            throw SymlinkError.renameDestinationExists(newPath)
+        }
+        guard fm.fileExists(atPath: oldPath) else {
+            throw SymlinkError.sourceNotFound(oldPath)
+        }
+
+        try fm.moveItem(atPath: oldPath, toPath: newPath)
+
+        let descriptor = FetchDescriptor<SymlinkTarget>(
+            predicate: #Predicate { $0.skillResolvedPath == oldPath }
+        )
+        let targets = (try? context.fetch(descriptor)) ?? []
+
+        for target in targets {
+            guard let tool = target.toolSourceEnum else { continue }
+            let kind = target.itemKind
+            let oldLinkedURL = URL(fileURLWithPath: target.linkedPath)
+            let newLinkedURL = oldLinkedURL
+                .deletingLastPathComponent()
+                .appendingPathComponent(newBaseName)
+                .appendingPathExtension(oldLinkedURL.pathExtension)
+            let newLinkedPath = newLinkedURL.path
+
+            // Remove old link (or dangling symlink entry)
+            if fm.fileExists(atPath: target.linkedPath)
+                || (try? fm.destinationOfSymbolicLink(atPath: target.linkedPath)) != nil {
+                do {
+                    try fm.removeItem(atPath: target.linkedPath)
+                } catch {
+                    AppLogger.fileIO.warning("SymlinkService.rename: failed to remove old link at \(target.linkedPath): \(error.localizedDescription)")
+                }
+            }
+
+            // Re-create at new path; hard links rebuild from the renamed source
+            do {
+                if tool.usesHardLink(for: kind) {
+                    try fm.linkItem(atPath: newPath, toPath: newLinkedPath)
+                } else {
+                    try fm.createSymbolicLink(atPath: newLinkedPath, withDestinationPath: newPath)
+                }
+                target.id = "\(newPath)\n\(tool.rawValue)"
+                target.skillResolvedPath = newPath
+                target.linkedPath = newLinkedPath
+            } catch {
+                AppLogger.fileIO.error("SymlinkService.rename: failed to re-link \(tool.rawValue) → \(newLinkedPath): \(error.localizedDescription)")
+            }
+        }
+
+        skill.resolvedPath = newPath
+        skill.filePath = newPath
+        skill.installedPaths = skill.installedPaths.map { $0 == oldPath ? newPath : $0 }
+
+        try context.save()
+        NotificationCenter.default.post(name: .customScanPathsChanged, object: nil)
+    }
+
     // MARK: - Query
 
     func targets(for skill: Skill, context: ModelContext) -> [SymlinkTarget] {
@@ -235,10 +339,10 @@ final class SymlinkService {
     // MARK: - Private
 
     /// Swaps `.md` → `.mdc` on the last path component when the tool and kind require it.
-    /// Only Cursor agents need this — rules use soft links and must keep `.md` so the
-    /// scanner can resolve and deduplicate them via symlink resolution.
+    /// Cursor requires `.mdc` for both agents and rules.
     private func useMarkdownExtension(_ tool: ToolSource, _ skill: Skill, _ url: URL) -> URL {
-        guard tool == .cursor, skill.itemKind == .agent,
+        guard tool == .cursor,
+              skill.itemKind == .agent || skill.itemKind == .rule,
               url.pathExtension == "md" else { return url }
         return url.deletingPathExtension().appendingPathExtension("mdc")
     }
@@ -260,8 +364,29 @@ final class SymlinkService {
     }
 
     /// Returns `source` relative to its scan base, preserving subdirectory structure.
-    private func relativePathFromScanBase(source: String, kind: ItemKind, toolSources: [ToolSource]) -> String {
+    private func relativePathFromScanBase(source: String, kind: ItemKind, toolSources: [ToolSource], installedPaths: [String]) -> String {
+        // 1. Resolved path against own tool sources (fast path for non-symlinked skills).
         for toolSource in toolSources {
+            for base in toolSource.globalDirs(for: kind) {
+                let prefix = base.hasSuffix("/") ? base : base + "/"
+                if source.hasPrefix(prefix) {
+                    return String(source.dropFirst(prefix.count))
+                }
+            }
+        }
+        // 2. Installed paths against own tool sources — resolvedPath may live outside all
+        //    scan bases (e.g. ~/.aidevtools/rules/python/file) but an installed path like
+        //    ~/.augment/rules/python/file still carries the correct relative structure.
+        for toolSource in toolSources {
+            for base in toolSource.globalDirs(for: kind) {
+                let prefix = base.hasSuffix("/") ? base : base + "/"
+                for path in installedPaths where path.hasPrefix(prefix) {
+                    return String(path.dropFirst(prefix.count))
+                }
+            }
+        }
+        // 3. Search all tool sources (catches shared-library sources not in toolSources).
+        for toolSource in ToolSource.allCases {
             for base in toolSource.globalDirs(for: kind) {
                 let prefix = base.hasSuffix("/") ? base : base + "/"
                 if source.hasPrefix(prefix) {
@@ -280,5 +405,4 @@ final class SymlinkService {
         }
         return dir
     }
-    
 }

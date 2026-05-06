@@ -65,6 +65,7 @@ struct SkillDetailView: View {
         case confirmMakeGlobal
         case deleteError(String)
         case makeGlobalError(String)
+        case renameError(String)
 
         var id: String {
             switch self {
@@ -76,6 +77,8 @@ struct SkillDetailView: View {
                 return "delete-error-\(message)"
             case .makeGlobalError(let message):
                 return "make-global-error-\(message)"
+            case .renameError(let message):
+                return "rename-error-\(message)"
             }
         }
     }
@@ -88,6 +91,7 @@ struct SkillDetailView: View {
     @State private var activeAlert: ActiveAlert?
     @State private var autoSaveTask: Task<Void, Never>?
     @State private var showingComposePanel = false
+    @State private var showingRenameSheet = false
 
     var body: some View {
         @Bindable var document = document
@@ -185,6 +189,16 @@ struct SkillDetailView: View {
                     .help("Show in Finder")
                 }
             }
+            if !skill.isReadOnly && !skill.isRemote && !skill.isDirectory {
+                ToolbarItem {
+                    Button {
+                        showingRenameSheet = true
+                    } label: {
+                        Image(systemName: "pencil.line")
+                    }
+                    .help("Rename File")
+                }
+            }
             if !skill.isReadOnly {
                 ToolbarItem {
                     Button {
@@ -238,6 +252,21 @@ struct SkillDetailView: View {
                     message: Text(message),
                     dismissButton: .default(Text("OK"))
                 )
+            case .renameError(let message):
+                return Alert(
+                    title: Text("Rename Failed"),
+                    message: Text(message),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
+        }
+        .sheet(isPresented: $showingRenameSheet) {
+            RenameSheet(skill: skill) { newBaseName in
+                do {
+                    try SymlinkService.shared.rename(skill, to: newBaseName, context: modelContext)
+                } catch {
+                    activeAlert = .renameError(error.localizedDescription)
+                }
             }
         }
     }
@@ -273,5 +302,65 @@ struct SkillDetailView: View {
         } catch {
             activeAlert = .deleteError(error.localizedDescription)
         }
+    }
+}
+
+private struct RenameSheet: View {
+    let skill: Skill
+    let onRename: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var newBaseName: String
+
+    private var currentBase: String {
+        URL(fileURLWithPath: skill.resolvedPath).deletingPathExtension().lastPathComponent
+    }
+
+    private var ext: String {
+        URL(fileURLWithPath: skill.resolvedPath).pathExtension
+    }
+
+    init(skill: Skill, onRename: @escaping (String) -> Void) {
+        self.skill = skill
+        self.onRename = onRename
+        _newBaseName = State(initialValue:
+            URL(fileURLWithPath: skill.resolvedPath).deletingPathExtension().lastPathComponent
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Rename \(skill.displayTypeName)")
+                .font(.headline)
+
+            TextField("Filename", text: $newBaseName)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { commit() }
+
+            if !ext.isEmpty {
+                Text("Extension .\(ext) will be preserved.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Rename") { commit() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(newBaseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                               || newBaseName == currentBase)
+            }
+        }
+        .padding(20)
+        .frame(width: 340)
+    }
+
+    private func commit() {
+        let trimmed = newBaseName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != currentBase else { return }
+        onRename(trimmed)
+        dismiss()
     }
 }

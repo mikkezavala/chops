@@ -72,6 +72,23 @@ struct ContentView: View {
         if fm.fileExists(atPath: claudeDesktopSessions) {
             allPaths.append(claudeDesktopSessions)
         }
+
+        // kqueue watches one directory level at a time. Also watch immediate subdirectories
+        // of rule paths so edits to files inside nested dirs (e.g. rules/swift/) trigger rescans.
+        for tool in ToolSource.allCases {
+            for rulePath in tool.globalRulePaths {
+                guard let subdirs = try? fm.contentsOfDirectory(atPath: rulePath) else { continue }
+                for subdir in subdirs {
+                    let subdirPath = "\(rulePath)/\(subdir)"
+                    var isDir: ObjCBool = false
+                    fm.fileExists(atPath: subdirPath, isDirectory: &isDir)
+                    if isDir.boolValue {
+                        allPaths.append(subdirPath)
+                    }
+                }
+            }
+        }
+
         allPaths = Array(Set(allPaths)).sorted()
 
         let watcher = FileWatcher { _ in

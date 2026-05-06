@@ -381,6 +381,8 @@ final class SkillScanner {
         // Resolve symlinks for the actual read — fileURL may be a remapped canonical path
         // that does not physically exist when a parent directory is a symlink.
         let physicalURL = fileURL.resolvingSymlinksInPath()
+        // Dangling symlink: entry exists in the directory but target is gone. Skip silently.
+        guard fm.fileExists(atPath: physicalURL.path) else { return nil }
         guard let parsed = SkillParser.parse(fileURL: physicalURL, toolSource: toolSource) else {
             AppLogger.scanning.warning("Failed to parse: \(fileURL.path)")
             return nil
